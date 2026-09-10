@@ -11,7 +11,7 @@ const app = express();
 const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
   .split(',')
   .map((s) => s.trim());
-app.use(cors({ origin: allowedOrigins }));
+app.use(allowedOrigins.includes('*') ? cors() : cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'kabadiwala-connect-api' }));
