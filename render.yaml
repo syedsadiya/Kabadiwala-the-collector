@@ -1,0 +1,18 @@
+# Render Blueprint — deploys the backend API as a Web Service.
+# Push this repo to GitHub, then in Render: New > Blueprint > pick this repo.
+# You'll be prompted to fill in JWT_SECRET as a secret.
+services:
+  - type: web
+    name: kabadiwala-connect-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: JWT_SECRET
+        sync: false
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: PORT
+        value: 10000
