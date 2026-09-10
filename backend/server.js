@@ -1,8 +1,10 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
 const connectDB = require('./config/db');
 const { WASTE_CATEGORIES, AP_AREAS } = require('./constants');
+const User = require('./models/User');
 
 const app = express();
 
@@ -31,6 +33,19 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-connectDB().then(() => {
+async function ensureDemoUsers() {
+  if (await User.countDocuments() > 0) return;
+
+  const password = await bcrypt.hash('demo1234', 10);
+  await User.insertMany([
+    { role: 'customer', name: 'Anita Sharma', email: 'customer@kabadiwalaconnect.demo', password },
+    { role: 'collector', name: 'Ramesh Yadav', email: 'collector@kabadiwalaconnect.demo', password },
+    { role: 'admin', name: 'Admin', email: 'admin@kabadiwalaconnect.demo', password },
+  ]);
+  console.log('Created demo users');
+}
+
+connectDB().then(async () => {
+  await ensureDemoUsers();
   app.listen(PORT, () => console.log(`Kabadiwala Connect API running on port ${PORT}`));
 });
