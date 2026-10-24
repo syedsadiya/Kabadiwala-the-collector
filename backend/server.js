@@ -58,15 +58,18 @@ async function ensureDemoUsers() {
     { role: 'admin', name: 'Admin', email: 'admin@kabadiwalaconnect.demo', phone: '9000000003', password },
   ];
 
-  if (await User.countDocuments() === 0) {
-    await User.insertMany(demoUsers);
-    console.log('Created demo users');
+  if (typeof User.findOne !== 'function') {
+    if (await User.countDocuments() === 0 && typeof User.insertMany === 'function') {
+      await User.insertMany(demoUsers);
+    }
     return;
   }
 
   for (const demoUser of demoUsers) {
     const existing = await User.findOne({ email: demoUser.email });
-    if (existing && !existing.phone) {
+    if (!existing) {
+      await User.create(demoUser);
+    } else if (!existing.phone) {
       await User.findOneAndUpdate({ email: demoUser.email }, { phone: demoUser.phone });
     }
   }

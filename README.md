@@ -50,9 +50,14 @@ npm run dev        # starts the API on http://localhost:5050
 ```
 
 Demo accounts created by the seed script (password `demo1234` for all):
-- `customer@kabadiwalaconnect.demo` (Anita Sharma)
-- `collector@kabadiwalaconnect.demo` (Ramesh Yadav)
-- `admin@kabadiwalaconnect.demo`
+- Customer phone: `9000000001` (Anita Sharma)
+- Collector phone: `9000000002` (Ramesh Yadav)
+- Admin email: `admin@kabadiwalaconnect.demo`
+- Admin compatibility phone: `9000000003`
+
+The login screen uses the admin email for the Admin role and a phone number for
+Customer or Kabadiwala. The API also accepts the legacy email field for
+backward-compatible clients.
 
 ## 2. Run the frontend locally
 
@@ -97,6 +102,14 @@ git push -u origin main
 5. Go back to Render and set `CLIENT_ORIGIN` to that Vercel URL, so the API's CORS allows it.
 
 *(Netlify works the same way: root directory `frontend`, build command `npm run build`, publish directory `dist`, same env var.)*
+
+Required production variables:
+
+- Vercel: `VITE_API_URL=https://<your-render-service>.onrender.com/api`
+- Render: `JWT_SECRET` (a long random secret), `CLIENT_ORIGIN` (the exact Vercel
+  origin), `GROQ_API_KEY`, and optionally `GROQ_MODEL`.
+
+Never put `JWT_SECRET` or `GROQ_API_KEY` in frontend files or commit them to Git.
 
 ## What's implemented
 

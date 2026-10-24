@@ -15,6 +15,7 @@ export default function Login({ initialMode = 'login' }) {
   const [mode, setMode] = useState(initialMode);
   const [role, setRole] = useState('customer');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
@@ -45,6 +46,7 @@ export default function Login({ initialMode = 'login' }) {
     setMode(next);
     setError('');
     setPhone('');
+    setEmail('');
     setPassword('');
     setName('');
     setArea('');
@@ -86,8 +88,12 @@ export default function Login({ initialMode = 'login' }) {
     setError('');
 
     const cleanPhone = phone.replace(/[\s()-]/g, '');
-
-    if (!/^\+?\d{10,13}$/.test(cleanPhone)) {
+    if (mode === 'login' && role === 'admin') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+        setError('Enter a valid admin email address');
+        return;
+      }
+    } else if (!/^\+?\d{10,13}$/.test(cleanPhone)) {
       setError('Enter a valid phone number with 10–13 digits');
       return;
     }
@@ -107,7 +113,8 @@ export default function Login({ initialMode = 'login' }) {
       const result =
         mode === 'login'
           ? await api.login({
-              phone: cleanPhone,
+              role,
+              identifier: role === 'admin' ? email.trim() : cleanPhone,
               password,
             })
           : await api.register({
@@ -230,14 +237,18 @@ export default function Login({ initialMode = 'login' }) {
             )}
 
             <div className="field">
-              <label>Phone Number</label>
+              <label>{mode === 'login' && role === 'admin' ? 'Admin Email' : 'Phone Number'}</label>
               <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Enter your phone number"
-                inputMode="tel"
-                autoComplete="tel"
+                type={mode === 'login' && role === 'admin' ? 'email' : 'tel'}
+                value={mode === 'login' && role === 'admin' ? email : phone}
+                onChange={(e) => (mode === 'login' && role === 'admin'
+                  ? setEmail(e.target.value)
+                  : setPhone(e.target.value))}
+                placeholder={mode === 'login' && role === 'admin'
+                  ? 'Enter your admin email'
+                  : 'Enter your phone number'}
+                inputMode={mode === 'login' && role === 'admin' ? 'email' : 'tel'}
+                autoComplete={mode === 'login' && role === 'admin' ? 'email' : 'tel'}
                 required
               />
             </div>

@@ -10,6 +10,7 @@ const normalizePhone = (value) =>
   String(value || '').replace(/[\s()-]/g, '');
 
 const validPhone = (phone) => /^\+?\d{10,13}$/.test(phone);
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 
 function signToken(user) {
   return jwt.sign(
@@ -141,22 +142,32 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login with phone number and password.
+// Admins may log in with email; customers and collectors use phone numbers.
 router.post('/login', async (req, res) => {
   try {
-    const phone = normalizePhone(req.body.phone);
+    const role = String(req.body.role || '').trim();
+    const identifier = String(req.body.identifier || req.body.phone || req.body.email || '').trim();
     const password = String(req.body.password || '');
 
-    if (!phone || !password) {
+    if (!identifier || !password) {
       return res.status(400).json({
-        message: 'Enter your phone number and password'
+        message: role === 'admin'
+          ? 'Enter your admin email and password'
+          : 'Enter your phone number and password'
       });
     }
 
     const users = await User.find({});
-    const user = users.find(
-      (u) => normalizePhone(u.phone) === phone
-    );
+    const emailLogin = role === 'admin' || identifier.includes('@');
+    const user = emailLogin
+      ? users.find((candidate) =>
+        (role === 'admin' ? candidate.role === 'admin' : true) &&
+        normalizeEmail(candidate.email) === normalizeEmail(identifier)
+      )
+      : users.find((candidate) =>
+        ['customer', 'collector'].includes(candidate.role) &&
+        normalizePhone(candidate.phone) === normalizePhone(identifier)
+      );
 
     if (!user) {
       return res.status(401).json({
