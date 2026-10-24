@@ -51,15 +51,25 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 async function ensureDemoUsers() {
-  if (await User.countDocuments() > 0) return;
-
   const password = await bcrypt.hash('demo1234', 10);
-  await User.insertMany([
-    { role: 'customer', name: 'Anita Sharma', email: 'customer@kabadiwalaconnect.demo', password, area: 'Kakinada', lat: 16.9891, lng: 82.2475, address: 'Ward 9, Kakinada, AP' },
-    { role: 'collector', name: 'Ramesh Yadav', email: 'collector@kabadiwalaconnect.demo', password, area: 'Kakinada', lat: 16.9891, lng: 82.2475, categories: ['paper', 'plastic', 'metal', 'cardboard'], verified: true },
-    { role: 'admin', name: 'Admin', email: 'admin@kabadiwalaconnect.demo', password },
-  ]);
-  console.log('Created demo users');
+  const demoUsers = [
+    { role: 'customer', name: 'Anita Sharma', email: 'customer@kabadiwalaconnect.demo', phone: '9000000001', password, area: 'Kakinada', lat: 16.9891, lng: 82.2475, address: 'Ward 9, Kakinada, AP' },
+    { role: 'collector', name: 'Ramesh Yadav', email: 'collector@kabadiwalaconnect.demo', phone: '9000000002', password, area: 'Kakinada', lat: 16.9891, lng: 82.2475, categories: ['paper', 'plastic', 'metal', 'cardboard'], verified: true },
+    { role: 'admin', name: 'Admin', email: 'admin@kabadiwalaconnect.demo', phone: '9000000003', password },
+  ];
+
+  if (await User.countDocuments() === 0) {
+    await User.insertMany(demoUsers);
+    console.log('Created demo users');
+    return;
+  }
+
+  for (const demoUser of demoUsers) {
+    const existing = await User.findOne({ email: demoUser.email });
+    if (existing && !existing.phone) {
+      await User.findOneAndUpdate({ email: demoUser.email }, { phone: demoUser.phone });
+    }
+  }
 }
 
 connectDB().then(async () => {
