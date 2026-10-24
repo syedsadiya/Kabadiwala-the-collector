@@ -5,6 +5,7 @@ import CustomerDashboard from './pages/CustomerDashboard';
 import CollectorDashboard from './pages/CollectorDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
+import PickupSuccess from './pages/PickupSuccess';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
       <Route path="/collector" element={<ProtectedRoute role="collector"><CollectorDashboard /></ProtectedRoute>} />
       <Route path="/admin" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
       <Route path="*" element={<Landing />} />
+      <Route path="/pickup-success" element={<PickupSuccess />} />
     </Routes>
   );
 }

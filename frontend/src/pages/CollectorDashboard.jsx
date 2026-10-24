@@ -5,19 +5,16 @@ import MockMap from '../components/MockMap';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-
-const AP_AREAS = [
-  { name: 'Kakinada', lat: 16.9891, lng: 82.2475 },
-  { name: 'Rajahmundry', lat: 17.0005, lng: 81.8040 },
-  { name: 'Vijayawada', lat: 16.5062, lng: 80.6480 },
-  { name: 'Visakhapatnam', lat: 17.6868, lng: 83.2185 },
-  { name: 'Amaravati', lat: 16.5738, lng: 80.3565 },
-];
+import { AP_AREAS } from '../constants';
 
 export default function CollectorDashboard() {
   const [sub, setSub] = useState('requests');
-  const { user, token } = useAuth();
+  const { user, token, setUser } = useAuth();
   const toast = useToast();
+  const [stats, setStats] = useState(null);
+  const [catFilter, setCatFilter] = useState('all');
+  const [categories, setCategories] = useState([]);
+  const [editCats, setEditCats] = useState(null);
   const [pickups, setPickups] = useState([]);
   const [collections, setCollections] = useState([]);
   const [modalPickup, setModalPickup] = useState(null);
@@ -29,22 +26,44 @@ export default function CollectorDashboard() {
   const area = AP_AREAS.find((a) => a.name === user?.area) || AP_AREAS[0];
 
   async function refresh() {
-    const [{ pickups }, { collections }, { centers }, { recyclers }] = await Promise.all([
-      api.myPickups(token), api.myCollections(token), api.centers(token), api.recyclers(token),
-    ]);
-    setPickups(pickups);
-    setCollections(collections);
-    setCenters(centers);
-    setRecyclers(recyclers);
+    try {
+      const [{ pickups }, { collections }, { centers }, { recyclers }, st, me] = await Promise.all([
+        api.myPickups(token), api.myCollections(token), api.centers(token), api.recyclers(token), api.myStats(token), api.me(token),
+      ]);
+      setPickups(pickups);
+      setCollections(collections);
+      setCenters(centers);
+      setRecyclers(recyclers);
+      setStats(st);
+      setUser(me.user);
+    } catch (err) { toast(err.message); }
   }
-  useEffect(() => { refresh(); }, []); // eslint-disable-line
+  useEffect(() => { refresh(); api.meta().then((m) => setCategories(m.categories)).catch(() => {}); }, []); // eslint-disable-line
+
+  const catLabel = (id) => { const c = categories.find((x) => x.id === id); return c ? `${c.icon} ${c.label}` : id; };
 
   async function accept(id) {
     try { await api.acceptPickup(token, id); toast('Pickup accepted'); refresh(); }
-    catch (err) { toast(err.message); }
+    catch (err) { toast(err.message); refresh(); }
   }
 
-  const requested = pickups.filter((p) => p.status === 'REQUESTED');
+  async function toggleAvailability() {
+    try {
+      const { user: updated } = await api.updateMe(token, { available: !user.available });
+      setUser(updated);
+      toast(updated.available ? 'You are now available for pickups' : 'You are now marked unavailable');
+    } catch (err) { toast(err.message); }
+  }
+
+  async function saveCategories() {
+    try {
+      const { user: updated } = await api.updateMe(token, { categories: editCats });
+      setUser(updated); setEditCats(null); toast('Categories updated');
+    } catch (err) { toast(err.message); }
+  }
+
+  const allRequested = pickups.filter((p) => p.status === 'REQUESTED');
+  const requested = allRequested.filter((p) => catFilter === 'all' || p.category === catFilter);
   const myActive = pickups.filter((p) => p.status === 'ACCEPTED');
 
   const links = [
@@ -57,7 +76,21 @@ export default function CollectorDashboard() {
     <AppShell roleName="Kabadiwala" links={links} active={sub} onNavigate={setSub}>
       {sub === 'requests' && (
         <>
-          <div className="page-head"><div><h1>Nearby requests</h1><p className="sub">Accept a request, then confirm the collection once weighed.</p></div></div>
+          <div className="page-head">
+            <div><h1>Nearby requests</h1><p className="sub">Accept a request, then confirm the collection once weighed.</p></div>
+            <button className={`avail-toggle ${user?.available ? 'on' : 'off'}`} onClick={toggleAvailability} aria-pressed={!!user?.available}>
+              <span className="dot" /> {user?.available ? 'Available' : 'Unavailable'}
+            </button>
+          </div>
+          {!user?.available && <div className="error-banner">You are marked unavailable, so you won’t be recommended to customers and can’t accept new pickups.</div>}
+          {stats && (
+            <div className="cards-grid">
+              <div className="kpi"><div className="lbl">Open near you</div><div className="val">{allRequested.length}</div></div>
+              <div className="kpi"><div className="lbl">In progress</div><div className="val">{stats.accepted}</div></div>
+              <div className="kpi"><div className="lbl">Completed</div><div className="val">{stats.completed}</div></div>
+              <div className="kpi"><div className="lbl">Collected</div><div className="val">{stats.totalKg} kg</div></div>
+            </div>
+          )}
 
           <MockMap
             area={area}
@@ -74,14 +107,24 @@ export default function CollectorDashboard() {
             hint={`${requested.length} open request(s) near ${user?.area}`}
           />
 
-          <h3 style={{ marginTop: 22 }}>Open requests</h3>
-          {requested.length === 0 && <div className="empty-state">No open requests right now.</div>}
+          <div className="page-head" style={{ marginTop: 22, marginBottom: 8 }}>
+            <h3 style={{ margin: 0 }}>Open requests</h3>
+            <select className="filter-select" value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="Filter by category">
+              <option value="all">All my categories</option>
+              {(user?.categories || []).map((c) => <option key={c} value={c}>{catLabel(c)}</option>)}
+            </select>
+          </div>
+          {requested.length === 0 && <div className="empty-state">{allRequested.length ? 'No requests in this category.' : 'No open requests for the categories you collect right now.'}</div>}
           {requested.map((p) => (
             <div className="request-card" key={p._id}>
               <div>
-                <div style={{ fontWeight: 700 }}>{p.customer?.name}</div>
+                <div style={{ fontWeight: 700 }}>
+                  {p.customer?.name} {p.forYou && <span className="pill pill-green">Requested for you</span>}
+                </div>
                 <div className="meta">
-                  {p.category} · ~{p.qtyEst} kg ·{' '}
+                  {catLabel(p.category)} · ~{p.qtyEst} kg
+                  {p.distanceKm != null && <> · {p.distanceKm} km away</>}
+                  {(p.pickupDate || p.pickupTime) && <> · {[p.pickupDate, p.pickupTime].filter(Boolean).join(' ')}</>} ·{' '}
                   <button
                     className="map-link"
                     type="button"
@@ -91,7 +134,7 @@ export default function CollectorDashboard() {
                   </button>
                 </div>
               </div>
-              <button className="btn btn-primary btn-sm" onClick={() => accept(p._id)}>Accept</button>
+              <button className="btn btn-primary btn-sm" disabled={!user?.available} onClick={() => accept(p._id)}>Accept</button>
             </div>
           ))}
 
@@ -100,9 +143,9 @@ export default function CollectorDashboard() {
           {myActive.map((p) => (
             <div className="request-card" key={p._id}>
               <div>
-                <div style={{ fontWeight: 700 }}>{p.customer?.name}</div>
+                <div style={{ fontWeight: 700 }}>{p.customer?.name}{p.customer?.phone ? ` · ${p.customer.phone}` : ''}</div>
                 <div className="meta">
-                  {p.category} · ~{p.qtyEst} kg ·{' '}
+                  {catLabel(p.category)} · ~{p.qtyEst} kg ·{' '}
                   <button
                     className="map-link"
                     type="button"
@@ -136,7 +179,7 @@ export default function CollectorDashboard() {
                 <tbody>
                   {collections.map((c) => (
                     <tr key={c._id}>
-                      <td>{c.collectionCode}</td><td>{c.category}</td><td>{c.weight} kg</td><td>₹{c.amountPaid}</td><td>{c.paymentMethod}</td>
+                      <td>{c.collectionCode}</td><td>{catLabel(c.category)}</td><td>{c.weight} kg</td><td>₹{c.amountPaid}</td><td>{c.paymentMethod}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -161,7 +204,24 @@ export default function CollectorDashboard() {
             </div>
             <p><b>Phone:</b> {user?.phone}</p>
             <p><b>Area:</b> {user?.area}</p>
-            <p><b>Categories handled:</b> {(user?.categories || []).join(', ')}</p>
+            <div style={{ marginBottom: 12 }}>
+              <b>Categories handled:</b>
+              {editCats ? (
+                <>
+                  <div className="chip-select" style={{ margin: '8px 0' }}>
+                    {categories.map((c) => (
+                      <button key={c.id} type="button" className={`chip-opt ${editCats.includes(c.id) ? 'sel' : ''}`}
+                        onClick={() => setEditCats((cur) => cur.includes(c.id) ? cur.filter((x) => x !== c.id) : [...cur, c.id])}>{c.icon} {c.label}</button>
+                    ))}
+                  </div>
+                  <button className="btn btn-primary btn-sm" disabled={!editCats.length} onClick={saveCategories}>Save</button>{' '}
+                  <button className="btn btn-ghost btn-sm" onClick={() => setEditCats(null)}>Cancel</button>
+                </>
+              ) : (
+                <> {(user?.categories || []).map(catLabel).join(', ')} <button className="link-btn" onClick={() => setEditCats(user?.categories || [])}>Edit</button></>
+              )}
+            </div>
+            <p><b>Availability:</b> {user?.available ? 'Available' : 'Unavailable'}</p>
             <p><b>Total waste collected:</b> {user?.totalWasteKg} kg</p>
             {user?.badges?.length > 0 && <p><b>Badges:</b> {user.badges.join(', ')}</p>}
           </div>
@@ -189,7 +249,13 @@ export default function CollectorDashboard() {
             <button className="close-x" onClick={() => setLastQr(null)}>✕</button>
             <h3>Collection confirmed</h3>
             <div className="qr-wrap">
-              <QRCodeSVG value={lastQr.collectionCode} size={140} fgColor="#1b4332" />
+              
+<QRCodeSVG
+  value="https://beamish-liger-dafe2d.netlify.app"
+  size={180}
+  fgColor="#1b4332"
+/>
+
               <p className="small-muted" style={{ margin: '8px 0 0' }}>{lastQr.collectionCode}</p>
             </div>
           </div>

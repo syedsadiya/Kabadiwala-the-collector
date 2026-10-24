@@ -1,24 +1,17 @@
 import { useEffect, useState } from 'react';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import AppShell from '../components/AppShell';
 import MockMap from '../components/MockMap';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { AP_AREAS, STATUS_LABEL } from '../constants';
 
 const COLORS = ['#2d6a4f', '#52796f', '#95d5b2', '#d98e2d', '#b5533c', '#74c69d', '#1b4332'];
-const STATUS_LABEL = { REQUESTED: 'Requested', ACCEPTED: 'Accepted', COLLECTED: 'Collected', VERIFIED: 'Verified', SENT_TO_RECYCLER: 'Sent to recycler', RECYCLED: 'Recycled' };
-const AP_AREAS = [
-  { name: 'Kakinada', lat: 16.9891, lng: 82.2475 },
-  { name: 'Rajahmundry', lat: 17.0005, lng: 81.8040 },
-  { name: 'Vijayawada', lat: 16.5062, lng: 80.6480 },
-  { name: 'Visakhapatnam', lat: 17.6868, lng: 83.2185 },
-  { name: 'Amaravati', lat: 16.5738, lng: 80.3565 },
-];
-
 export default function AdminDashboard() {
   const [sub, setSub] = useState('overview');
   const { token } = useAuth();
   const [stats, setStats] = useState(null);
+  const [error, setError] = useState('');
   const [collectors, setCollectors] = useState([]);
   const [recyclers, setRecyclers] = useState([]);
   const [centers, setCenters] = useState([]);
@@ -30,6 +23,7 @@ export default function AdminDashboard() {
   }
 
   async function refresh() {
+    try {
     const [statsRes, usersRes, recyclersRes, centersRes] = await Promise.all([
       api.adminStats(token), api.users(token, '?role=collector'), api.recyclers(token), api.centers(token),
     ]);
@@ -37,6 +31,15 @@ export default function AdminDashboard() {
     setCollectors(usersRes.users);
     setRecyclers(recyclersRes.recyclers);
     setCenters(centersRes.centers);
+    } catch (err) { setError(err.message); }
+  }
+    async function verifyCollector(collectorId) {
+    try {
+      await api.verifyCollector(token, collectorId);
+      await refresh();
+    } catch (err) {
+      setError(err.message || 'Could not verify collector');
+    }
   }
   useEffect(() => { refresh(); }, []); // eslint-disable-line
 
@@ -48,10 +51,12 @@ export default function AdminDashboard() {
     { key: 'impact', label: 'Impact', icon: '🌱' },
   ];
 
-  if (!stats) return <AppShell roleName="Admin" links={links} active={sub} onNavigate={setSub}><div className="loading-shell">Loading…</div></AppShell>;
+  if (!stats) return <AppShell roleName="Admin" links={links} active={sub} onNavigate={setSub}><div className="loading-shell">{error || 'Loading…'}</div></AppShell>;
 
   const categoryData = Object.entries(stats.byCategory).map(([id, kg]) => ({ name: id, value: +kg.toFixed(1) })).filter((d) => d.value > 0);
   const statusData = Object.entries(stats.byStatus).map(([status, count]) => ({ name: STATUS_LABEL[status] || status, count }));
+  const pipelineData = Object.entries(stats.pickupStatus).map(([status, count]) => ({ name: STATUS_LABEL[status] || status, count }));
+  const PIPE_COLORS = { Requested: '#d98e2d', Accepted: '#2563eb', Collected: '#2d6a4f', Cancelled: '#9aa5a0' };
 
   return (
     <AppShell roleName="Admin" links={links} active={sub} onNavigate={setSub}>
@@ -59,11 +64,11 @@ export default function AdminDashboard() {
         <>
           <div className="page-head"><div><h1>Overview</h1><p className="sub">Platform-wide activity at a glance.</p></div></div>
           <div className="cards-grid">
-            <div className="kpi"><div className="lbl">Collectors</div><div className="val">{stats.kpis.totalCollectors}</div></div>
-            <div className="kpi"><div className="lbl">Total waste</div><div className="val">{stats.kpis.totalKg.toFixed(0)} kg</div></div>
-            <div className="kpi"><div className="lbl">CO₂e saved</div><div className="val">{stats.kpis.co2.toFixed(0)} kg</div></div>
-            <div className="kpi"><div className="lbl">Pickups</div><div className="val">{stats.kpis.totalPickups}</div></div>
-            <div className="kpi"><div className="lbl">Completed</div><div className="val">{stats.kpis.completedPickups}</div></div>
+            <div className="kpi"><div className="lbl">Completed pickups</div><div className="val">{stats.kpis.completedPickups}</div></div>
+            <div className="kpi"><div className="lbl">Waste collected</div><div className="val">{stats.kpis.totalKg.toFixed(0)} kg</div></div>
+            <div className="kpi"><div className="lbl">Pending pickups</div><div className="val">{stats.kpis.pendingPickups}</div></div>
+            <div className="kpi"><div className="lbl">Accepted, not collected</div><div className="val">{stats.kpis.acceptedPickups}</div></div>
+            <div className="kpi"><div className="lbl">Collectors available</div><div className="val">{stats.kpis.availableCollectors}/{stats.kpis.totalCollectors}</div></div>
           </div>
 
           <div className="two-col">
@@ -92,6 +97,34 @@ export default function AdminDashboard() {
             </div>
           </div>
 
+          <div className="two-col">
+            <div className="panel">
+              <h3>Monthly collections (completed pickups)</h3>
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={stats.monthly}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e6e2d3" />
+                  <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="pickups" name="Pickups" stroke="#2d6a4f" strokeWidth={3} dot={{ r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="panel">
+              <h3>Pickup requests by status</h3>
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={pipelineData}>
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="Requests">
+                    {pipelineData.map((d) => <Cell key={d.name} fill={PIPE_COLORS[d.name] || '#2d6a4f'} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
           <div className="panel">
             <h3>Top collectors</h3>
             <ResponsiveContainer width="100%" height={240}>
@@ -112,13 +145,35 @@ export default function AdminDashboard() {
           <MockMap area={mapFocus} focus={mapFocus} hint={`Showing ${mapFocus.name}`} />
           <div className="panel">
             <table>
-              <thead><tr><th>Name</th><th>Area</th><th>Rating</th><th>Completed</th><th>Total kg</th><th>Status</th></tr></thead>
-              <tbody>
+<thead>
+  <tr>
+    <th>Name</th>
+    <th>Area</th>
+    <th>Rating</th>
+    <th>Completed</th>
+    <th>Total kg</th>
+    <th>Status</th>
+    <th>Action</th>
+  </tr>
+</thead>              <tbody>
                 {collectors.map((c) => (
                   <tr key={c._id}>
                     <td>{c.name}</td><td><button className="map-link" type="button" onClick={() => focusCity(c.area)}>{c.area}</button></td><td>★ {c.rating}</td><td>{c.completed}</td><td>{c.totalWasteKg}</td>
-                    <td>{c.verified ? <span className="pill pill-green">Verified</span> : <span className="pill pill-amber">Pending</span>}</td>
-                  </tr>
+<td>
+  {c.verified
+    ? <span className="pill pill-green">Verified</span>
+    : <span className="pill pill-amber">Pending</span>}
+</td>
+<td>
+  {!c.verified && (
+    <button
+      type="button"
+      onClick={() => verifyCollector(c._id)}
+    >
+      Verify
+    </button>
+  )}
+</td>                  </tr>
                 ))}
               </tbody>
             </table>
@@ -167,11 +222,15 @@ export default function AdminDashboard() {
           <div className="page-head"><div><h1>Environmental impact</h1></div></div>
           <div className="impact-band">
             <div className="impact-item"><div className="num">{stats.kpis.totalKg.toFixed(0)} kg</div><div className="lbl">Recyclable waste collected</div></div>
-            <div className="impact-item"><div className="num">{(stats.kpis.totalKg * 0.92).toFixed(0)} kg</div><div className="lbl">Est. diverted from landfill</div></div>
-            <div className="impact-item"><div className="num">{stats.kpis.co2.toFixed(0)} kg CO₂e</div><div className="lbl">Estimated impact</div></div>
+            <div className="impact-item"><div className="num">{stats.kpis.completedPickups}</div><div className="lbl">Completed pickups</div></div>
+            <div className="impact-item"><div className="num">{stats.kpis.co2.toFixed(0)} kg CO₂e</div><div className="lbl">Estimated, not measured</div></div>
             <div className="impact-item"><div className="num">{stats.kpis.totalCollectors}</div><div className="lbl">Collectors integrated</div></div>
             <div className="impact-item"><div className="num">{recyclers.length}</div><div className="lbl">Recycling partners</div></div>
           </div>
+          <p className="small-muted" style={{ marginTop: 14 }}>
+            Weights come from recorded collections in the database. CO₂e is an estimate: {stats.co2Note.replace('Estimate: ', '')}
+            {' '}Seeded demo records are sample data, not real impact.
+          </p>
         </>
       )}
     </AppShell>

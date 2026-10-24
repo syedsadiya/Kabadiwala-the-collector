@@ -6,6 +6,11 @@ const connectDB = require('./config/db');
 const { WASTE_CATEGORIES, AP_AREAS } = require('./constants');
 const User = require('./models/User');
 
+if (!process.env.JWT_SECRET) {
+  console.error('JWT_SECRET is not set. Copy .env.example to .env and set a long random value.');
+  process.exit(1);
+}
+
 const app = express();
 
 const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
@@ -24,7 +29,8 @@ app.use('/api/recyclers', require('./routes/recyclers'));
 app.use('/api/centers', require('./routes/centers'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/stats', require('./routes/stats'));
-
+app.use('/api/rewards', require('./routes/rewards'));
+app.use('/api/chatbot', require('./routes/chatbot'));
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
@@ -38,8 +44,8 @@ async function ensureDemoUsers() {
 
   const password = await bcrypt.hash('demo1234', 10);
   await User.insertMany([
-    { role: 'customer', name: 'Anita Sharma', email: 'customer@kabadiwalaconnect.demo', password },
-    { role: 'collector', name: 'Ramesh Yadav', email: 'collector@kabadiwalaconnect.demo', password },
+    { role: 'customer', name: 'Anita Sharma', email: 'customer@kabadiwalaconnect.demo', password, area: 'Kakinada', lat: 16.9891, lng: 82.2475, address: 'Ward 9, Kakinada, AP' },
+    { role: 'collector', name: 'Ramesh Yadav', email: 'collector@kabadiwalaconnect.demo', password, area: 'Kakinada', lat: 16.9891, lng: 82.2475, categories: ['paper', 'plastic', 'metal', 'cardboard'], verified: true },
     { role: 'admin', name: 'Admin', email: 'admin@kabadiwalaconnect.demo', password },
   ]);
   console.log('Created demo users');

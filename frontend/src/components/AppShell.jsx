@@ -7,7 +7,7 @@ export default function AppShell({ roleName, links, active, onNavigate, children
 
   function handleLogout() {
     logout();
-    navigate('/');
+    navigate('/login');
   }
 
   const initials = (user?.name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2);

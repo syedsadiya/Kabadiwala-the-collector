@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import ChatWidget from '../components/ChatWidget';
 
 function ImpactCounter({ value, suffix = '', decimals = 0 }) {
   const [current, setCurrent] = useState(0);
@@ -755,6 +756,7 @@ export default function Landing() {
 
       </footer>
 
+      <ChatWidget />
     </div>
   );
 }

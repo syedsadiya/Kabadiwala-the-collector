@@ -15,6 +15,30 @@ kabadiwala-connect/
 └── README.md
 ```
 
+
+## What's new in this version
+
+**Smart Collector Matching** (`backend/services/matching.js`, `GET /api/pickups/:id/matches`)
+1. *Eligibility filter* — only collectors who are **available** and **accept the requested waste category**.
+2. *Transparent ranking, score out of 100* — 60% proximity (distance to the pickup, 0 beyond 50 km) + 25% rating + 15% experience (completed pickups, capped at 50). Ties go to the closer collector.
+3. The customer sees each collector's score breakdown and reasons, and can route the request to one (`PATCH /api/pickups/:id/request-collector`). The collector still has to accept. If nobody qualifies, the request stays open to everyone and the UI says so.
+
+**Pickup lifecycle:** `REQUESTED → ACCEPTED → COLLECTED` (then `VERIFIED → SENT_TO_RECYCLER → RECYCLED` by admin) plus `CANCELLED`.
+- Accepting and completing are atomic in the database, so two collectors can't take the same request and a pickup can't be recorded twice.
+- Customers can cancel only while the request is still open; admins can cancel open or accepted requests.
+- Collection amount is calculated on the server from the recorded weight, not trusted from the browser.
+
+**Impact dashboard** (`GET /api/stats/admin`): completed pickups, kg collected, pending/accepted, waste by category, monthly trend (last 6 months), pickup-status chart. All values come from database records. CO₂e is an **estimate** (flat 1.8 kg CO₂e per kg recorded) and labelled as such.
+
+**Other changes:** server-side validation on register / pickup / collection; public sign-up can no longer create admin accounts; emails are stored lower-case (mixed-case sign-ups could not log in before); `/api/users` is admin-only; collector phone/customer phone are shared only after a pickup is accepted; availability toggle and editable categories for collectors; `populate()` now really joins customer/collector names (they were blank in the dashboards); logout returns to `/login`; friendlier "cannot reach server" error.
+
+**Existing databases:** `kabadiwala.sqlite` is migrated automatically on start (new columns only, no data loss). Run `npm run seed` for a fresh demo set (open requests, one unavailable collector, 6 months of **sample** history).
+
+**Not included:** AI photo classification. No tested model/API is wired in, so it is not claimed anywhere in the app.
+
+## Tests
+With the API running: see `backend/test/api.test.js` (`npm test` from `backend/`, needs the server on `API_URL`, default `http://localhost:5000/api`, seeded with `npm run seed`).
+
 ## 1. Run the backend locally
 
 ```bash

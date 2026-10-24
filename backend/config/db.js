@@ -40,8 +40,64 @@ function initSchema() {
   `);
 }
 
+// Adds a column only if it is missing, so an existing kabadiwala.sqlite keeps its data.
+function addColumnIfMissing(table, column, definition) {
+  const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+
+function migrate() {
+  addColumnIfMissing('users', 'available', 'INTEGER DEFAULT 1');
+  addColumnIfMissing('pickups', 'pickupDate', 'TEXT');
+  addColumnIfMissing('pickups', 'preferredCollector', 'INTEGER');
+
+  // Green Rewards: keep a permanent record of each points award.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS reward_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer INTEGER NOT NULL,
+      pickup INTEGER NOT NULL,
+      collectionId INTEGER NOT NULL UNIQUE,
+      category TEXT NOT NULL,
+      weight REAL NOT NULL CHECK (weight > 0),
+      points INTEGER NOT NULL CHECK (points >= 0),
+      createdAt TEXT NOT NULL,
+      FOREIGN KEY (customer) REFERENCES users(id),
+      FOREIGN KEY (pickup) REFERENCES pickups(id),
+      FOREIGN KEY (collectionId) REFERENCES collections(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rewards_customer
+      ON reward_transactions(customer);
+
+    CREATE TABLE IF NOT EXISTS user_badges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      userId INTEGER NOT NULL,
+      badgeKey TEXT NOT NULL,
+      earnedAt TEXT NOT NULL,
+      UNIQUE (userId, badgeKey),
+      FOREIGN KEY (userId) REFERENCES users(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_badges_user
+      ON user_badges(userId);
+
+    CREATE INDEX IF NOT EXISTS idx_pickups_status
+      ON pickups(status);
+
+    CREATE INDEX IF NOT EXISTS idx_pickups_customer
+      ON pickups(customer);
+
+    CREATE INDEX IF NOT EXISTS idx_collections_collector
+      ON collections(collector);
+  `);
+}
+
+
 async function connectDB() {
   initSchema();
+  migrate();
   console.log('SQLite database connected');
 }
 

@@ -8,7 +8,7 @@ function hydrate(row, jsonFields = []) {
   jsonFields.forEach((field) => {
     try { result[field] = JSON.parse(result[field] || '[]'); } catch { result[field] = []; }
   });
-  ['verified'].forEach((field) => {
+  ['verified', 'available'].forEach((field) => {
     if (field in result) result[field] = Boolean(result[field]);
   });
   return result;
@@ -34,14 +34,28 @@ class Query {
     return this;
   }
 
-  populate(path) {
-    this.populates.push(path);
+  populate(path, select = '') {
+    this.populates.push({ path, fields: String(select).split(/\s+/).filter(Boolean) });
     return this;
   }
 
   then(resolve, reject) {
     try {
-      const result = this.rows.map((row) => this.model.decorate(hydrate(row, this.model.jsonFields), this.populates));
+      const result = this.rows.map((row) => {
+        const doc = hydrate(row, this.model.jsonFields);
+        this.populates.forEach(({ path, fields }) => {
+          const ref = this.model.refs && this.model.refs[path];
+          if (!ref || doc[path] == null) return;
+          const target = db.prepare(`SELECT * FROM ${ref.table} WHERE id = ?`).get(doc[path]);
+          if (!target) return;
+          const full = hydrate(target, ref.jsonFields || []);
+          delete full.password;
+          const picked = { _id: full._id, id: full.id };
+          (fields.length ? fields : Object.keys(full)).forEach((f) => { if (f in full) picked[f] = full[f]; });
+          doc[path] = picked;
+        });
+        return this.model.decorate(doc, this.populates);
+      });
       if (this.excludePassword) result.forEach((row) => delete row.password);
       return Promise.resolve(result).then(resolve, reject);
     } catch (error) {
@@ -50,13 +64,14 @@ class Query {
   }
 }
 
-function makeModel({ table, fields, jsonFields = [], defaults = {}, decorate = (row) => row }) {
+function makeModel({ table, fields, jsonFields = [], defaults = {}, refs = {}, decorate = (row) => row }) {
   const columns = Object.keys(fields);
   const model = {
     jsonFields,
+    refs,
     decorate,
     async create(input) {
-      const values = { ...defaults, ...input, createdAt: now() };
+      const values = { ...defaults, ...input, createdAt: input.createdAt || now() };
       const serialized = columns.map((column) => jsonFields.includes(column) ? JSON.stringify(values[column] || []) : sqlValue(values[column]));
       const result = db.prepare(`INSERT INTO ${table} (${columns.join(', ')}, createdAt) VALUES (${columns.map(() => '?').join(', ')}, ?)`).run(...serialized, values.createdAt);
       return model.findById(result.lastInsertRowid);
