@@ -17,6 +17,17 @@ const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
   .split(',')
   .map((s) => s.trim());
 app.use(allowedOrigins.includes('*') ? cors() : cors({ origin: allowedOrigins }));
+app.options('*', (req, res) => {
+  const origin = req.get('Origin');
+  if (origin && (allowedOrigins.includes('*') || allowedOrigins.includes(origin))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE');
+  const requestedHeaders = req.get('Access-Control-Request-Headers');
+  if (requestedHeaders) res.setHeader('Access-Control-Allow-Headers', requestedHeaders);
+  res.setHeader('Vary', 'Origin, Access-Control-Request-Headers');
+  res.sendStatus(204);
+});
 app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'kabadiwala-connect-api' }));
