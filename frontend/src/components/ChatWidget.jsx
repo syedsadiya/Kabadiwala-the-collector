@@ -29,6 +29,10 @@ export default function ChatWidget() {
   }, [messages, loading, error, open]);
 
   async function requestReply(request) {
+    if (!token) {
+      setError('Please log in before using the recycling assistant.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
