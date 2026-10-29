@@ -159,9 +159,11 @@ router.patch('/:id/accept', requireAuth, requireRole('collector'), async (req, r
     if (!me.available) return res.status(409).json({ message: 'Set yourself as Available before accepting pickups' });
     if (!accepts(me, pickup.category)) return res.status(403).json({ message: `Your profile does not include ${pickup.category}` });
     // Atomic claim: only one collector can move REQUESTED -> ACCEPTED.
-    const claim = db.prepare("UPDATE pickups SET collector = ?, status = 'ACCEPTED' WHERE id = ? AND status = 'REQUESTED'")
-      .run(req.user.id, pickup._id);
-    if (claim.changes === 0) return res.status(409).json({ message: 'Pickup was already accepted or cancelled' });
+    const claim = await db.query(
+      "UPDATE pickups SET collector = $1, status = 'ACCEPTED' WHERE id = $2 AND status = 'REQUESTED'",
+      [req.user.id, pickup._id]
+    );
+    if (claim.rowCount === 0) return res.status(409).json({ message: 'Pickup was already accepted or cancelled' });
     res.json({ pickup: await Pickup.findById(pickup._id) });
   } catch (err) {
     res.status(500).json({ message: 'Could not accept pickup', error: err.message });
@@ -176,9 +178,12 @@ router.patch('/:id/cancel', requireAuth, requireRole('customer', 'admin'), async
     const pickup = await loadManageable(req, res);
     if (!pickup) return;
     const cancellable = req.user.role === 'admin' ? ['REQUESTED', 'ACCEPTED'] : ['REQUESTED'];
-    const result = db.prepare(`UPDATE pickups SET status = 'CANCELLED' WHERE id = ? AND status IN (${cancellable.map(() => '?').join(',')})`)
-      .run(pickup._id, ...cancellable);
-    if (result.changes === 0) {
+    const placeholders = cancellable.map((_, index) => `$${index + 2}`).join(', ');
+    const result = await db.query(
+      `UPDATE pickups SET status = 'CANCELLED' WHERE id = $1 AND status IN (${placeholders})`,
+      [pickup._id, ...cancellable]
+    );
+    if (result.rowCount === 0) {
       return res.status(409).json({ message: 'This pickup can no longer be cancelled. Contact the collector or an admin.' });
     }
     res.json({ pickup: await Pickup.findById(pickup._id) });

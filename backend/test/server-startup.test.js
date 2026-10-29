@@ -51,6 +51,8 @@ function wait(milliseconds) {
 async function run() {
   try {
     require('../server');
+    // dotenv loads the developer's local .env during require('../server'); keep this smoke test key-free.
+    delete process.env.GROQ_API_KEY;
     for (let attempt = 0; attempt < 100 && !httpServer; attempt += 1) await wait(20);
     assert.ok(httpServer, 'Backend should start and listen');
 

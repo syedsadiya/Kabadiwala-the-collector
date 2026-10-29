@@ -5,11 +5,11 @@ A full-stack rebuild of the Kabadiwala Connect prototype — connecting househol
 **Stack**
 - **Frontend:** React 18 + Vite + React Router + Recharts (charts) + qrcode.react
 - **Backend:** Node.js + Express (REST API), JWT auth, bcrypt password hashing
-- **Database:** SQLite (local `backend/kabadiwala.sqlite` file)
+- **Database:** Supabase PostgreSQL (SQLite was used only as the migration source)
 
 ```
 kabadiwala-connect/
-├── backend/          Express API + SQLite models + seed script
+├── backend/          Express API + PostgreSQL models, schema, and migration script
 ├── frontend/          React app (Vite)
 ├── render.yaml        Render deployment blueprint for the backend
 └── README.md
@@ -32,7 +32,7 @@ kabadiwala-connect/
 
 **Other changes:** server-side validation on register / pickup / collection; public sign-up can no longer create admin accounts; emails are stored lower-case (mixed-case sign-ups could not log in before); `/api/users` is admin-only; collector phone/customer phone are shared only after a pickup is accepted; availability toggle and editable categories for collectors; `populate()` now really joins customer/collector names (they were blank in the dashboards); logout returns to `/login`; friendlier "cannot reach server" error.
 
-**Existing databases:** `kabadiwala.sqlite` is migrated automatically on start (new columns only, no data loss). Run `npm run seed` for a fresh demo set (open requests, one unavailable collector, 6 months of **sample** history).
+**Existing databases:** The idempotent `npm run migrate:sqlite` importer was run against the original SQLite database. It preserved IDs and password hashes, reported matching source/destination counts, and the SQLite file was then backed up outside the repository and removed from the project.
 
 **Not included:** AI photo classification. No tested model/API is wired in, so it is not claimed anywhere in the app.
 
@@ -45,8 +45,8 @@ With the API running: see `backend/test/api.test.js` (`npm test` from `backend/`
 cd backend
 cp .env.example .env
 npm install
-npm run seed      # creates the SQLite file and demo data
-npm run dev        # starts the API on http://localhost:5050
+npm run migrate:sqlite  # only after DATABASE_URL points to the target database
+npm run dev             # starts the API on http://localhost:5000
 ```
 
 Demo accounts created by the seed script (password `demo1234` for all):
@@ -87,10 +87,11 @@ git push -u origin main
 ### Backend → Render
 1. Sign in at https://render.com and connect your GitHub account.
 2. **New > Blueprint**, select this repo — Render will read `render.yaml` and create the `kabadiwala-connect-api` web service (root dir `backend`).
-3. When prompted, set `JWT_SECRET` to any long random string.
+3. Set `DATABASE_URL` to the Supabase **direct/transaction-pooler PostgreSQL connection string** in the Render backend environment. Do not put it in frontend variables or Git.
+4. When prompted, set `JWT_SECRET` to any long random string.
    - `CLIENT_ORIGIN` — your deployed frontend URL (set this after step 2 below; you can update it any time in Render's dashboard)
-4. Deploy. Note the resulting API URL, e.g. `https://kabadiwala-connect-api.onrender.com`.
-5. Run the seed script once in the deployed service environment with `npm run seed`.
+5. Deploy. Note the resulting API URL, e.g. `https://kabadiwala-connect-api.onrender.com`.
+6. Before switching traffic, run the migration locally with the same `DATABASE_URL`, then deploy and confirm `GET /api/health`.
 
 *(Any Node host works the same way. The important env vars are `JWT_SECRET` and `CLIENT_ORIGIN`.)*
 
@@ -106,10 +107,19 @@ git push -u origin main
 Required production variables:
 
 - Vercel: `VITE_API_URL=https://<your-render-service>.onrender.com/api`
-- Render: `JWT_SECRET` (a long random secret), `CLIENT_ORIGIN` (the exact Vercel
+- Render: `DATABASE_URL` (Supabase PostgreSQL connection string), `JWT_SECRET` (a long random secret), `CLIENT_ORIGIN` (the exact Vercel
   origin), `GROQ_API_KEY`, and optionally `GROQ_MODEL`.
 
 Never put `JWT_SECRET` or `GROQ_API_KEY` in frontend files or commit them to Git.
+
+### SQLite backup and migration
+
+1. Stop writes to the old backend or use a maintenance window.
+2. Copy `backend/kabadiwala.sqlite` to a separate backup location. Do not delete the original.
+3. In `backend/.env`, set `DATABASE_URL` to the Supabase connection string and optionally set `SQLITE_SOURCE` to the backup path.
+4. Run `npm run migrate:sqlite`. The command creates the schema, imports parent tables before child tables, uses `ON CONFLICT DO NOTHING`, resets identity sequences, and verifies counts.
+5. Review every source/destination count and relationship error before deploying. If it fails, PostgreSQL rolls back and the SQLite file remains unchanged.
+6. Configure the same `DATABASE_URL` in Render and redeploy. Keep the external SQLite backup until authentication, pickups, collections, rewards, statistics, and chatbot checks pass in production.
 
 ## What's implemented
 

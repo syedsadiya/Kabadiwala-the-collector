@@ -1,12 +1,17 @@
 const { db } = require('../config/db');
 
 const now = () => new Date().toISOString();
+const quote = (identifier) => `"${identifier.replaceAll('"', '""')}"`;
 
 function hydrate(row, jsonFields = []) {
   if (!row) return null;
   const result = { ...row, _id: row.id };
   jsonFields.forEach((field) => {
-    try { result[field] = JSON.parse(result[field] || '[]'); } catch { result[field] = []; }
+    if (typeof result[field] === 'string') {
+      try { result[field] = JSON.parse(result[field] || '[]'); } catch { result[field] = []; }
+    } else if (result[field] == null) {
+      result[field] = [];
+    }
   });
   ['verified', 'available'].forEach((field) => {
     if (field in result) result[field] = Boolean(result[field]);
@@ -15,17 +20,17 @@ function hydrate(row, jsonFields = []) {
 }
 
 class Query {
-  constructor(model, rows) {
+  constructor(model, filter) {
     this.model = model;
-    this.rows = rows;
+    this.filter = filter;
+    this.order = null;
+    this.fields = null;
     this.populates = [];
     this.excludePassword = false;
   }
 
   sort(order) {
-    const field = order.replace('-', '');
-    const direction = order.startsWith('-') ? -1 : 1;
-    this.rows.sort((a, b) => String(a[field] || '').localeCompare(String(b[field] || '')) * direction);
+    this.order = order;
     return this;
   }
 
@@ -39,42 +44,56 @@ class Query {
     return this;
   }
 
-  then(resolve, reject) {
-    try {
-      const result = this.rows.map((row) => {
-        const doc = hydrate(row, this.model.jsonFields);
-        this.populates.forEach(({ path, fields }) => {
-          const ref = this.model.refs && this.model.refs[path];
-          if (!ref || doc[path] == null) return;
-          const target = db.prepare(`SELECT * FROM ${ref.table} WHERE id = ?`).get(doc[path]);
-          if (!target) return;
-          const full = hydrate(target, ref.jsonFields || []);
-          delete full.password;
-          const picked = { _id: full._id, id: full.id };
-          (fields.length ? fields : Object.keys(full)).forEach((f) => { if (f in full) picked[f] = full[f]; });
-          doc[path] = picked;
+  async execute() {
+    const { where, values } = buildWhere(this.filter);
+    const orderBy = this.order
+      ? ` ORDER BY ${quote(this.order.replace('-', ''))} ${this.order.startsWith('-') ? 'DESC' : 'ASC'}`
+      : '';
+    const result = await db.query(`SELECT * FROM ${quote(this.model.table)}${where}${orderBy}`, values);
+    const rows = result.rows.map((row) => hydrate(row, this.model.jsonFields));
+    for (const doc of rows) {
+      for (const { path, fields } of this.populates) {
+        const ref = this.model.refs[path];
+        if (!ref || doc[path] == null) continue;
+        const target = await db.query(`SELECT * FROM ${quote(ref.table)} WHERE id = $1`, [doc[path]]);
+        if (!target.rows[0]) continue;
+        const full = hydrate(target.rows[0], ref.jsonFields || []);
+        delete full.password;
+        const picked = { _id: full._id, id: full.id };
+        (fields.length ? fields : Object.keys(full)).forEach((field) => {
+          if (field in full) picked[field] = full[field];
         });
-        return this.model.decorate(doc, this.populates);
-      });
-      if (this.excludePassword) result.forEach((row) => delete row.password);
-      return Promise.resolve(result).then(resolve, reject);
-    } catch (error) {
-      return Promise.reject(error).then(resolve, reject);
+        doc[path] = picked;
+      }
+      this.model.decorate(doc);
+      if (this.excludePassword) delete doc.password;
     }
+    return rows;
+  }
+
+  then(resolve, reject) {
+    return this.execute().then(resolve, reject);
   }
 }
 
 function makeModel({ table, fields, jsonFields = [], defaults = {}, refs = {}, decorate = (row) => row }) {
   const columns = Object.keys(fields);
+  const booleanFields = new Set(['verified', 'available']);
   const model = {
+    table,
     jsonFields,
     refs,
     decorate,
     async create(input) {
       const values = { ...defaults, ...input, createdAt: input.createdAt || now() };
-      const serialized = columns.map((column) => jsonFields.includes(column) ? JSON.stringify(values[column] || []) : sqlValue(values[column]));
-      const result = db.prepare(`INSERT INTO ${table} (${columns.join(', ')}, createdAt) VALUES (${columns.map(() => '?').join(', ')}, ?)`).run(...serialized, values.createdAt);
-      return model.findById(result.lastInsertRowid);
+      const insertColumns = [...columns, 'createdAt'];
+      const params = insertColumns.map((column) => serialize(column, values[column], jsonFields, booleanFields));
+      const placeholders = params.map((_, index) => `$${index + 1}`).join(', ');
+      const result = await db.query(
+        `INSERT INTO ${quote(table)} (${insertColumns.map(quote).join(', ')}) VALUES (${placeholders}) RETURNING id`,
+        params
+      );
+      return model.findById(result.rows[0].id);
     },
     async insertMany(inputs) {
       const results = [];
@@ -82,18 +101,20 @@ function makeModel({ table, fields, jsonFields = [], defaults = {}, refs = {}, d
       return results;
     },
     async findById(id) {
-      return attach(hydrate(db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id), jsonFields));
+      const result = await db.query(`SELECT * FROM ${quote(table)} WHERE id = $1`, [id]);
+      return attach(result.rows[0] ? hydrate(result.rows[0], jsonFields) : null);
     },
     find(filter = {}) {
-      const rows = db.prepare(`SELECT * FROM ${table}`).all().filter((row) => matches(row, filter));
-      return new Query(model, rows);
+      return new Query(model, filter);
     },
     async findOne(filter = {}) {
-      const row = db.prepare(`SELECT * FROM ${table}`).all().find((candidate) => matches(candidate, filter));
-      return attach(hydrate(row, jsonFields));
+      const rows = await model.find(filter);
+      return attach(rows[0] || null);
     },
     async countDocuments(filter = {}) {
-      return db.prepare(`SELECT * FROM ${table}`).all().filter((row) => matches(row, filter)).length;
+      const { where, values } = buildWhere(filter);
+      const result = await db.query(`SELECT COUNT(*)::int AS count FROM ${quote(table)}${where}`, values);
+      return result.rows[0].count;
     },
     async findByIdAndUpdate(id, update) {
       return model.updateById(id, update);
@@ -105,19 +126,19 @@ function makeModel({ table, fields, jsonFields = [], defaults = {}, refs = {}, d
     async updateById(id, update) {
       const current = await model.findById(id);
       if (!current) return null;
-      const changes = update.$inc ? Object.fromEntries(Object.entries(update.$inc).map(([key, value]) => [key, (current[key] || 0) + value])) : update;
+      const changes = update.$inc
+        ? Object.fromEntries(Object.entries(update.$inc).map(([key, value]) => [key, (current[key] || 0) + value]))
+        : update;
       const entries = Object.entries(changes).filter(([key]) => columns.includes(key));
-      if (entries.length) {
-        const values = entries.map(([key, value]) => `${key} = ?`);
-        const params = entries.map(([key, value]) => jsonFields.includes(key) ? JSON.stringify(value || []) : sqlValue(value));
-        db.prepare(`UPDATE ${table} SET ${values.join(', ')} WHERE id = ?`).run(...params, id);
-      }
+      if (!entries.length) return current;
+      const params = entries.map(([key, value]) => serialize(key, value, jsonFields, booleanFields));
+      const assignments = entries.map((([key], index) => `${quote(key)} = $${index + 1}`)).join(', ');
+      await db.query(`UPDATE ${quote(table)} SET ${assignments} WHERE id = $${params.length + 1}`, [...params, id]);
       return model.findById(id);
     },
     async deleteMany(filter = {}) {
-      const rows = db.prepare(`SELECT id FROM ${table}`).all().filter((row) => matches(row, filter));
-      const statement = db.prepare(`DELETE FROM ${table} WHERE id = ?`);
-      rows.forEach(({ id }) => statement.run(id));
+      const { where, values } = buildWhere(filter);
+      await db.query(`DELETE FROM ${quote(table)}${where}`, values);
     },
   };
   function attach(row) {
@@ -129,17 +150,31 @@ function makeModel({ table, fields, jsonFields = [], defaults = {}, refs = {}, d
   return model;
 }
 
-function matches(row, filter) {
-  if (filter.$or) return filter.$or.some((condition) => matches(row, condition));
-  return Object.entries(filter).every(([key, value]) => {
-    const normalized = typeof value === 'boolean' ? (value ? 1 : 0) : value;
-    return String(row[key]) === String(normalized);
-  });
+function serialize(column, value, jsonFields, booleanFields) {
+  if (jsonFields.includes(column)) return JSON.stringify(value || []);
+  if (booleanFields.has(column)) return Boolean(value);
+  return value ?? null;
 }
 
-function sqlValue(value) {
-  if (typeof value === 'boolean') return value ? 1 : 0;
-  return value ?? null;
+function buildWhere(filter = {}, offset = 0) {
+  if (!Object.keys(filter).length) return { where: '', values: [] };
+  if (filter.$or) {
+    const clauses = [];
+    const values = [];
+    filter.$or.forEach((condition) => {
+      const part = buildWhere(condition, offset + values.length);
+      clauses.push(part.where.replace(/^ WHERE /, ''));
+      values.push(...part.values);
+    });
+    return { where: ` WHERE (${clauses.join(' OR ')})`, values };
+  }
+  const values = [];
+  const clauses = Object.entries(filter).map(([key, value]) => {
+    const numericKey = ['id', 'customer', 'collector', 'preferredCollector', 'pickup', 'userId', 'collectionId'].includes(key);
+    values.push(numericKey && value != null ? Number(value) : typeof value === 'boolean' ? value : value ?? null);
+    return `${quote(key)} = $${offset + values.length}`;
+  });
+  return { where: ` WHERE ${clauses.join(' AND ')}`, values };
 }
 
 module.exports = { makeModel, hydrate, db };

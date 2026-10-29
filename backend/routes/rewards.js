@@ -5,31 +5,32 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 
 // GET /api/rewards/mine
 // Customer's points, history and earned badges.
-router.get('/mine', requireAuth, requireRole('customer'), (req, res) => {
+router.get('/mine', requireAuth, requireRole('customer'), async (req, res) => {
   try {
     const customerId = req.user.id;
 
-    const balance = db.prepare(`
-      SELECT COALESCE(SUM(points), 0) AS totalPoints,
-             COUNT(*) AS completedPickups,
-             COALESCE(SUM(weight), 0) AS totalWasteKg
+    const balanceResult = await db.query(`
+      SELECT COALESCE(SUM(points), 0)::int AS "totalPoints",
+             COUNT(*)::int AS "completedPickups",
+             COALESCE(SUM(weight), 0) AS "totalWasteKg"
       FROM reward_transactions
-      WHERE customer = ?
-    `).get(customerId);
+      WHERE customer = $1
+    `, [customerId]);
+    const balance = balanceResult.rows[0];
 
-    const history = db.prepare(`
-      SELECT id, pickup, category, weight, points, createdAt
+    const historyResult = await db.query(`
+      SELECT id, pickup, category, weight, points, "createdAt"
       FROM reward_transactions
-      WHERE customer = ?
+      WHERE customer = $1
       ORDER BY id DESC
-    `).all(customerId);
+    `, [customerId]);
 
-    const badges = db.prepare(`
-      SELECT badgeKey, earnedAt
+    const badgesResult = await db.query(`
+      SELECT "badgeKey", "earnedAt"
       FROM user_badges
-      WHERE userId = ?
+      WHERE "userId" = $1
       ORDER BY id DESC
-    `).all(customerId);
+    `, [customerId]);
 
     res.json({
       rewards: {
@@ -39,8 +40,8 @@ router.get('/mine', requireAuth, requireRole('customer'), (req, res) => {
         level: balance.totalPoints >= 500 ? 'Eco Champion'
           : balance.totalPoints >= 100 ? 'Eco Warrior'
           : 'Eco Starter',
-        history,
-        badges,
+        history: historyResult.rows,
+        badges: badgesResult.rows,
       },
     });
   } catch (err) {
@@ -51,24 +52,24 @@ router.get('/mine', requireAuth, requireRole('customer'), (req, res) => {
 
 // GET /api/rewards/leaderboard
 // Shows the top 10 customers by earned points.
-router.get('/leaderboard', requireAuth, (req, res) => {
+router.get('/leaderboard', requireAuth, async (req, res) => {
   try {
-    const leaderboard = db.prepare(`
-      SELECT u.id AS userId,
+    const result = await db.query(`
+      SELECT u.id AS "userId",
              u.name AS name,
-             COALESCE(SUM(r.points), 0) AS totalPoints,
-             COUNT(r.id) AS completedPickups,
-             COALESCE(SUM(r.weight), 0) AS totalWasteKg
+             COALESCE(SUM(r.points), 0)::int AS "totalPoints",
+             COUNT(r.id)::int AS "completedPickups",
+             COALESCE(SUM(r.weight), 0) AS "totalWasteKg"
       FROM users u
       LEFT JOIN reward_transactions r ON r.customer = u.id
       WHERE u.role = 'customer'
       GROUP BY u.id, u.name
       HAVING COUNT(r.id) > 0
-      ORDER BY totalPoints DESC, completedPickups DESC, u.name ASC
+      ORDER BY "totalPoints" DESC, "completedPickups" DESC, u.name ASC
       LIMIT 10
-    `).all();
+    `);
 
-    res.json({ leaderboard });
+    res.json({ leaderboard: result.rows });
   } catch (err) {
     console.error('Leaderboard lookup failed:', err);
     res.status(500).json({ message: 'Could not load leaderboard' });

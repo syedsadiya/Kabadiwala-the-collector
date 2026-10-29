@@ -103,9 +103,7 @@ router.post('/register', async (req, res) => {
       }
     }
 
-    // The current SQLite schema requires a unique email.
-    // This reserved internal address allows registration without asking
-    // the user for an email or changing the existing database schema.
+    // Keep phone-only registration compatible with the database's unique email constraint.
     const internalEmail =
       `phone-${cleanPhone.replace(/\D/g, '')}@phone.kabadiwala.invalid`;
 
